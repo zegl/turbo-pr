@@ -7,6 +7,11 @@ import (
 	"fmt"
 	"strings"
 
+	"net/http"
+	"os"
+	"regexp"
+
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -18,9 +23,6 @@ var config *Config
 func main() {
 	config = getConfig("conf.yaml")
 
-	//log.Printf("%+v", config)
-	//return
-
 	setupGitHubClient()
 	go webserver()
 	select {}
@@ -29,7 +31,7 @@ func main() {
 func setupGitHubClient() {
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: "4b9fbcf38c49d42ef49fa4f5d11e9bb13c813f81"},
+		&oauth2.Token{AccessToken: os.Getenv("GITHUB_ACCESS_TOKEN")},
 	)
 	tc := oauth2.NewClient(ctx, ts)
 
@@ -39,7 +41,8 @@ func setupGitHubClient() {
 func webserver() {
 	r := gin.Default()
 	r.POST("/gh-webhook", webhook)
-	r.Run("127.0.0.1:8080")
+	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "turbo-pr") })
+	r.Run(":80")
 }
 
 func webhook(c *gin.Context) {
@@ -68,10 +71,10 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 	}
 
 	allStatuses := map[string]bool{
-		"commit-count":          true,
-		// "commit-title":          true,
-		"subject-length":        true,
-		// "commit-message-length": true,
+		"commit-count":    true,
+		"commit-title":    true,
+		"subject-length":  true,
+		"body-row-length": true,
 	}
 
 	// Action that we don't care about
@@ -95,39 +98,54 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 
 	// Get Commit from GitHub
 	commit := webhookGetCommit(ev)
-	commitMessage := strings.Split(*commit.Commit.Message, "\n")
-	log.Printf("%+v", commitMessage)
 
 	// Commit subject length
-	if config.Commit.MaxSubjectLength != nil || config.Commit.MinSubjectLength != nil {
-		maxLen := 100000
-		minLen := 0
+	if config.Commit.MaxSubjectLength != nil && config.Commit.MinSubjectLength != nil {
+		maxLen := *config.Commit.MaxSubjectLength
+		minLen := *config.Commit.MinSubjectLength
 
-		if config.Commit.MaxSubjectLength != nil {
-			maxLen = *config.Commit.MaxSubjectLength
+		if !commitMessageSubjectIsValid(*commit.Commit.Message, maxLen, minLen) {
+			// Send status to GH
+			webhookSetStatus(ev, "failure",
+				fmt.Sprintf("Invalid subject message length: Min:%d, Max:%d", minLen, maxLen),
+				"subject-length")
+
+			// Mark as failed locally
+			allStatuses["subject-length"] = false
 		}
-		if config.Commit.MinSubjectLength != nil {
-			minLen = *config.Commit.MinSubjectLength
+	}
+
+	// Commit body row length
+	if config.Commit.MaxBodyMessageLength != nil {
+		if !commitMessageBodyIsValid(*commit.Commit.Message, *config.Commit.MaxBodyMessageLength) {
+			// Send status to GH
+			webhookSetStatus(ev, "failure",
+				fmt.Sprintf("Invalid body message length: Max %d chars per row", *config.Commit.MaxBodyMessageLength),
+				"body-row-length")
+
+			// Mark as failed locally
+			allStatuses["body-row-length"] = false
 		}
+	}
 
-		commitLen := len(commitMessage[0])
+	// Commit message regex
+	if len(config.Commit.SubjectMustMatchRegex) > 0 {
+		success := false
 
-		success := true
-
-		if commitLen > maxLen || commitLen < minLen {
-			success = false
+		for _, re := range config.Commit.SubjectMustMatchRegex {
+			if commitMessageMatchesRegex(*commit.Commit.Message, re) {
+				success = true
+			}
 		}
 
 		if !success {
 			// Send status to GH
 			webhookSetStatus(ev, "failure",
-				fmt.Sprintf("Commit subject message length: %d (Min:%d, Max:%d)",
-					commitLen, minLen, maxLen,
-				),
-				"subject-length")
+				"Commit message does not match any valid format",
+				"commit-title")
 
 			// Mark as failed locally
-			allStatuses["subject-length"] = false
+			allStatuses["commit-title"] = false
 		}
 	}
 
@@ -165,4 +183,44 @@ func webhookGetCommit(ev *github.PullRequestEvent) *github.RepositoryCommit {
 	}
 
 	return commit
+}
+
+func commitMessageSubjectIsValid(message string, subjectMaxLen, subjectMinLen int) bool {
+	messageRows := strings.Split(message, "\n")
+	messageSubject := messageRows[0]
+
+	// Commit subject length
+	if len(messageSubject) > subjectMaxLen || len(messageSubject) < subjectMinLen {
+		return false
+	}
+
+	return true
+}
+
+// commitMessageBodyIsValid tests the length of the rows in the body is of an allowed length
+// message should be the full commit message, including the first row
+func commitMessageBodyIsValid(message string, bodyMaxRowLen int) bool {
+	messageRows := strings.Split(message, "\n")
+
+	// Body lengths
+	if len(messageRows) > 1 {
+		for _, row := range messageRows[1:] {
+			if len(row) > bodyMaxRowLen {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func commitMessageMatchesRegex(message, regex string) bool {
+	message = strings.Split(message, "\n")[0]
+
+	r, err := regexp.Compile(regex)
+	if err != nil {
+		return false
+	}
+
+	return r.MatchString(message)
 }
