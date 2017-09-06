@@ -1,0 +1,11 @@
+pullRequest:
+  maxAllowedCommits: 1
+
+commit:
+  maxSubjectLength: 72
+  minSubjectLength: 10
+
+  maxBodyRowLength: 50
+
+  subjectMustMatchRegex:
+  - "hej"
