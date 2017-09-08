@@ -1,8 +1,9 @@
 package main
 
-import "io/ioutil"
-import "gopkg.in/yaml.v2"
-
+import (
+	"io/ioutil"
+	"gopkg.in/yaml.v2"
+)
 
 type Config struct {
 	PullRequest struct {
@@ -13,6 +14,8 @@ type Config struct {
 		MaxSubjectLength      *int     `yaml:"maxSubjectLength"`
 		MinSubjectLength      *int     `yaml:"minSubjectLength"`
 		SubjectMustMatchRegex []string `yaml:"subjectMustMatchRegex"`
+
+		MaxBodyMessageLength *int `yaml:"maxBodyMessageLength"`
 	} `yaml:"commit"`
 }
 
