@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"log"
-
 	"fmt"
 	"strings"
-
 	"net/http"
 	"os"
 	"regexp"
@@ -146,7 +144,6 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 			// Mark as failed locally
 			allStatuses["commit-title"] = false
 		}
-
 	}
 
 	// Mark the checks that did not fail as successful
