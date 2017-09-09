@@ -3,46 +3,58 @@ package main
 import (
 	"context"
 	"log"
-
 	"fmt"
 	"strings"
-
 	"net/http"
-	"os"
 	"regexp"
-
+	"flag"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/github"
-	"golang.org/x/oauth2"
+	"github.com/bradleyfalzon/ghinstallation"
 )
 
-var gh *github.Client
 var config *Config
 
-func main() {
-	config = getConfig("conf.yaml")
+var flagHttpPort *int
+var flagGitHubAppKey *string
 
-	setupGitHubClient()
+func main() {
+	flagHttpPort = flag.Int("port", 80, "HTTP port")
+	flagGitHubAppKey = flag.String("github-key", "", "GitHub App Private Key")
+	flag.Parse()
+
+	config = getConfig("conf.yaml")
 	go webserver()
 	select {}
 }
 
-func setupGitHubClient() {
-	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: os.Getenv("GITHUB_ACCESS_TOKEN")},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-
-	gh = github.NewClient(tc)
-}
-
 func webserver() {
 	r := gin.Default()
+
+	// Webhook handler
 	r.POST("/gh-webhook", webhook)
-	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "turbo-pr") })
-	r.Run(":80")
+
+	// Index
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "https://github.com/zegl/turbo-pr")
+	})
+
+	err := r.Run(":" + strconv.Itoa(*flagHttpPort))
+	if err != nil {
+		panic(err)
+	}
+}
+
+// getGitHubClient creates a GitHub client for the installationID
+func getGitHubClient(installationID int) *github.Client {
+	itr, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, 5073, installationID, *flagGitHubAppKey)
+	if err != nil {
+		panic(err)
+	}
+
+	return github.NewClient(&http.Client{Transport: itr})
 }
 
 func webhook(c *gin.Context) {
@@ -56,15 +68,17 @@ func webhook(c *gin.Context) {
 		panic(err)
 	}
 
+	log.Printf("X-Github-Event: %s", c.GetHeader("X-Github-Event"))
+
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
 		webhookPullRequest(event)
 	}
-
-	log.Printf("Unknown event: %s", c.GetHeader("X-GitHub-Event"))
 }
 
 func webhookPullRequest(ev *github.PullRequestEvent) {
+	gh := getGitHubClient(*ev.Installation.ID)
+
 	checkActions := map[string]struct{}{
 		"opened":      {},
 		"synchronize": {},
@@ -87,7 +101,7 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 		// More than one commit? Denied!
 		if *ev.PullRequest.Commits > *config.PullRequest.MaxAllowedCommits {
 			// Send status to GH
-			webhookSetStatus(ev, "failure",
+			webhookSetStatus(gh, ev, "failure",
 				fmt.Sprintf("PR contains more than %d commit", *config.PullRequest.MaxAllowedCommits),
 				"commit-count")
 
@@ -97,7 +111,11 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 	}
 
 	// Get Commit from GitHub
-	commit := webhookGetCommit(ev)
+	commit, err := webhookGetCommit(gh, ev)
+
+	if err != nil {
+		panic(err)
+	}
 
 	// Commit subject length
 	if config.Commit.MaxSubjectLength != nil && config.Commit.MinSubjectLength != nil {
@@ -106,7 +124,7 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 
 		if !commitMessageSubjectIsValid(*commit.Commit.Message, maxLen, minLen) {
 			// Send status to GH
-			webhookSetStatus(ev, "failure",
+			webhookSetStatus(gh, ev, "failure",
 				fmt.Sprintf("Invalid subject message length: Min:%d, Max:%d", minLen, maxLen),
 				"subject-length")
 
@@ -119,7 +137,7 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 	if config.Commit.MaxBodyMessageLength != nil {
 		if !commitMessageBodyIsValid(*commit.Commit.Message, *config.Commit.MaxBodyMessageLength) {
 			// Send status to GH
-			webhookSetStatus(ev, "failure",
+			webhookSetStatus(gh, ev, "failure",
 				fmt.Sprintf("Invalid body message length: Max %d chars per row", *config.Commit.MaxBodyMessageLength),
 				"body-row-length")
 
@@ -140,7 +158,7 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 
 		if !success {
 			// Send status to GH
-			webhookSetStatus(ev, "failure",
+			webhookSetStatus(gh, ev, "failure",
 				"Commit message does not match any valid format",
 				"commit-title")
 
@@ -152,12 +170,12 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 	// Mark the checks that did not fail as successful
 	for statusID, statusSuccess := range allStatuses {
 		if statusSuccess {
-			webhookSetStatus(ev, "success", "OK!", statusID)
+			webhookSetStatus(gh, ev, "success", "OK!", statusID)
 		}
 	}
 }
 
-func webhookSetStatus(ev *github.PullRequestEvent, state string, description string, statusContext string) {
+func webhookSetStatus(gh *github.Client, ev *github.PullRequestEvent, state string, description string, statusContext string) {
 	gh.Repositories.CreateStatus(
 		context.Background(),
 		*ev.Repo.Owner.Login,
@@ -171,7 +189,7 @@ func webhookSetStatus(ev *github.PullRequestEvent, state string, description str
 	)
 }
 
-func webhookGetCommit(ev *github.PullRequestEvent) *github.RepositoryCommit {
+func webhookGetCommit(gh *github.Client, ev *github.PullRequestEvent) (*github.RepositoryCommit, error) {
 	commit, _, err := gh.Repositories.GetCommit(
 		context.Background(),
 		*ev.Repo.Owner.Login,
@@ -179,10 +197,11 @@ func webhookGetCommit(ev *github.PullRequestEvent) *github.RepositoryCommit {
 		*ev.PullRequest.Head.SHA,
 	)
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return nil, err
 	}
 
-	return commit
+	return commit, nil
 }
 
 func commitMessageSubjectIsValid(message string, subjectMaxLen, subjectMinLen int) bool {
