@@ -1,10 +1,5 @@
 package main
 
-import (
-	"gopkg.in/yaml.v2"
-	"io/ioutil"
-)
-
 type Config struct {
 	PullRequest struct {
 		MaxAllowedCommits *int `yaml:"maxAllowedCommits"`
@@ -16,20 +11,4 @@ type Config struct {
 		SubjectMustMatchRegex []string `yaml:"subjectMustMatchRegex"`
 		MaxBodyMessageLength *int `yaml:"maxBodyMessageLength"`
 	} `yaml:"commit"`
-}
-
-func getConfig(configFile string) *Config {
-	configData, err := ioutil.ReadFile(configFile)
-	if err != nil {
-		panic(err)
-	}
-
-	var conf Config
-
-	err = yaml.Unmarshal(configData, &conf)
-	if err != nil {
-		panic(err)
-	}
-
-	return &conf
 }

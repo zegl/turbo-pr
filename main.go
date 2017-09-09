@@ -9,25 +9,26 @@ import (
 	"regexp"
 	"flag"
 	"strconv"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/github"
 	"github.com/bradleyfalzon/ghinstallation"
+	"gopkg.in/yaml.v2"
 )
-
-var config *Config
 
 var flagHttpPort *int
 var flagGitHubAppKey *string
+var flagGitHubIntegrationID *int
 
 func main() {
 	flagHttpPort = flag.Int("port", 80, "HTTP port")
 	flagGitHubAppKey = flag.String("github-key", "", "GitHub App Private Key")
+	flagGitHubIntegrationID = flag.Int("github-id", 5073, "GitHub App ID")
+
 	flag.Parse()
 
-	config = getConfig("conf.yaml")
-	go webserver()
-	select {}
+	webserver()
 }
 
 func webserver() {
@@ -49,7 +50,7 @@ func webserver() {
 
 // getGitHubClient creates a GitHub client for the installationID
 func getGitHubClient(installationID int) *github.Client {
-	itr, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, 5073, installationID, *flagGitHubAppKey)
+	itr, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, *flagGitHubIntegrationID, installationID, *flagGitHubAppKey)
 	if err != nil {
 		panic(err)
 	}
@@ -77,8 +78,6 @@ func webhook(c *gin.Context) {
 }
 
 func webhookPullRequest(ev *github.PullRequestEvent) {
-	gh := getGitHubClient(*ev.Installation.ID)
-
 	checkActions := map[string]struct{}{
 		"opened":      {},
 		"synchronize": {},
@@ -89,10 +88,21 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 		"commit-title":    true,
 		"subject-length":  true,
 		"body-row-length": true,
+		"setup":           true,
 	}
 
 	// Action that we don't care about
 	if _, ok := checkActions[*ev.Action]; !ok {
+		return
+	}
+
+	gh := getGitHubClient(*ev.Installation.ID)
+
+	config, err := webhookGetConfigFile(gh, ev)
+	if err != nil {
+		log.Println(err)
+		// Send status to GH
+		webhookSetStatus(gh, ev, "failure", "turbo-pr.yaml not found", "setup")
 		return
 	}
 
@@ -196,12 +206,46 @@ func webhookGetCommit(gh *github.Client, ev *github.PullRequestEvent) (*github.R
 		*ev.Repo.Name,
 		*ev.PullRequest.Head.SHA,
 	)
+
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 
 	return commit, nil
+}
+
+// webhookGetConfigFile loads a *Config based from the turbo-pr.yaml file in the repo
+func webhookGetConfigFile(gh *github.Client, ev *github.PullRequestEvent) (*Config, error) {
+	file, _, _, err := gh.Repositories.GetContents(
+		context.Background(),
+		*ev.Repo.Owner.Login,
+		*ev.Repo.Name,
+		"turbo-pr.yaml",
+		&github.RepositoryContentGetOptions{
+			Ref: *ev.PullRequest.Head.SHA,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if file.GetEncoding() != "base64" {
+		return nil, errors.New("Encoding was not base64: " + file.GetEncoding())
+	}
+
+	fileContent, err := file.GetContent()
+	if err != nil {
+		return nil, err
+	}
+
+	var conf Config
+	err = yaml.Unmarshal([]byte(fileContent), &conf)
+	if err != nil {
+		return nil, err
+	}
+
+	return &conf, nil
 }
 
 func commitMessageSubjectIsValid(message string, subjectMaxLen, subjectMinLen int) bool {
