@@ -2,6 +2,18 @@
 
 
 [[projects]]
+  name = "github.com/bradleyfalzon/ghinstallation"
+  packages = ["."]
+  revision = "14854a3ebfc8004781bd05b3ed37094ea8beb922"
+  version = "v0.1.0"
+
+[[projects]]
+  name = "github.com/dgrijalva/jwt-go"
+  packages = ["."]
+  revision = "d2709f9f1f31ebcda9651b03077758c1f3a0018c"
+  version = "v3.0.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/gin-contrib/sse"
   packages = ["."]
@@ -45,27 +57,9 @@
 
 [[projects]]
   branch = "master"
-  name = "golang.org/x/net"
-  packages = ["context","context/ctxhttp"]
-  revision = "66aacef3dd8a676686c7ae3716979581e8b03c47"
-
-[[projects]]
-  branch = "master"
-  name = "golang.org/x/oauth2"
-  packages = [".","internal"]
-  revision = "d89af98d7c6bba047c5a2622f36bc14b8766df85"
-
-[[projects]]
-  branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
   revision = "9aade4d3a3b7e6d876cd3823ad20ec45fc035402"
-
-[[projects]]
-  name = "google.golang.org/appengine"
-  packages = ["internal","internal/base","internal/datastore","internal/log","internal/remote_api","internal/urlfetch","urlfetch"]
-  revision = "150dc57a1b433e64154302bdc40b6bb8aefa313a"
-  version = "v1.0.0"
 
 [[projects]]
   name = "gopkg.in/go-playground/validator.v8"
@@ -82,6 +76,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "864106927d5122018aadd149f21196c5c930a8d794b206c9e5e55397478c9330"
+  inputs-digest = "36000d098b2b0d65a9d6303adb184b89a35ddce6c2cde9cd8bd1a7e6e401be62"
   solver-name = "gps-cdcl"
   solver-version = 1
