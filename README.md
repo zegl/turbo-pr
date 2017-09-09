@@ -8,3 +8,19 @@ Turbo PR is a tool for automatic Pull Request quality checks.
 * Max/Min length of commit message subjects
 * Max length of commit message body rows
 * Regex matching commit subjects
+
+## Configuration 
+
+```yaml
+pullRequest:
+  maxAllowedCommits: 1
+
+commit:
+  maxSubjectLength: 72
+  minSubjectLength: 10
+
+  maxBodyRowLength: 50
+
+  subjectMustMatchRegex:
+  - "^(fea|fix|doc)\\([a-z0-9\\-]{2,30}\\)"
+```
