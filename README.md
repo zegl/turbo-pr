@@ -9,7 +9,7 @@ Turbo PR is a tool for automatic Pull Request quality checks.
 * Max length of commit message body rows
 * Regex matching commit subjects
 
-## Configuration 
+## Configuration (add this as `turbo-pr.yaml` to your repo)
 
 ```yaml
 pullRequest:
