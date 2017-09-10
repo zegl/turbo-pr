@@ -10,6 +10,7 @@ import (
 	"flag"
 	"strconv"
 	"errors"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-github/github"
@@ -20,13 +21,19 @@ import (
 var flagHttpPort *int
 var flagGitHubAppKey *string
 var flagGitHubIntegrationID *int
+var flagGoogleCloudProjectID *string
+var flagGoogleCloudCredentialsFile *string
 
 func main() {
 	flagHttpPort = flag.Int("port", 80, "HTTP port")
 	flagGitHubAppKey = flag.String("github-key", "", "GitHub App Private Key")
 	flagGitHubIntegrationID = flag.Int("github-id", 5073, "GitHub App ID")
+	flagGoogleCloudProjectID = flag.String("gc-id", "", "Google Cloud Project ID")
+	flagGoogleCloudCredentialsFile = flag.String("gc-credentials", "", "Google Cloud Credentials")
 
 	flag.Parse()
+
+	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", *flagGoogleCloudCredentialsFile)
 
 	webserver()
 }
@@ -39,6 +46,7 @@ func webserver() {
 
 	// Index
 	r.GET("/", func(c *gin.Context) {
+		logger("index-visit", struct{}{})
 		c.Redirect(http.StatusFound, "https://github.com/zegl/turbo-pr")
 	})
 
@@ -73,7 +81,10 @@ func webhook(c *gin.Context) {
 
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
+		logger(c.GetHeader("X-Github-Event"), event)
 		webhookPullRequest(event)
+	default:
+		logger(c.GetHeader("X-Github-Event"), struct{}{})
 	}
 }
 
