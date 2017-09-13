@@ -46,7 +46,7 @@ func webserver() {
 
 	// Index
 	r.GET("/", func(c *gin.Context) {
-		logger("index-visit", struct{}{})
+		logger("index-visit", "index-visit")
 		c.Redirect(http.StatusFound, "https://github.com/zegl/turbo-pr")
 	})
 
@@ -72,19 +72,17 @@ func webhook(c *gin.Context) {
 		panic(err)
 	}
 
+	// Log incoming event to Stackdriver
+	logger(c.GetHeader("X-Github-Event"), string(payload))
+
 	event, err := github.ParseWebHook(github.WebHookType(c.Request), payload)
 	if err != nil {
 		panic(err)
 	}
 
-	log.Printf("X-Github-Event: %s", c.GetHeader("X-Github-Event"))
-
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
-		logger(c.GetHeader("X-Github-Event"), event)
 		webhookPullRequest(event)
-	default:
-		logger(c.GetHeader("X-Github-Event"), struct{}{})
 	}
 }
 
