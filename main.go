@@ -165,25 +165,10 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 		}
 	}
 
-	// Commit message regex
-	if len(config.Commit.SubjectMustMatchRegex) > 0 {
-		success := false
-
-		for _, re := range config.Commit.SubjectMustMatchRegex {
-			if commitMessageMatchesRegex(*commit.Commit.Message, re) {
-				success = true
-			}
-		}
-
-		if !success {
-			// Send status to GH
-			webhookSetStatus(gh, ev, "failure",
-				"Commit message does not match any valid format",
-				"commit-title")
-
-			// Mark as failed locally
-			allStatuses["commit-title"] = false
-		}
+	if message, ok := checkAllCommitsMessage(gh, ev, config); !ok {
+		webhookSetStatus(gh, ev, "failure",
+			message,"commit-title")
+		allStatuses["commit-title"] = false
 	}
 
 	// Mark the checks that did not fail as successful
@@ -192,6 +177,39 @@ func webhookPullRequest(ev *github.PullRequestEvent) {
 			webhookSetStatus(gh, ev, "success", "OK!", statusID)
 		}
 	}
+}
+
+func checkAllCommitsMessage(gh *github.Client, ev *github.PullRequestEvent, config *Config) (string, bool) {
+
+	// Commit message regex
+	if len(config.Commit.SubjectMustMatchRegex) > 0 {
+
+		// Get all commits in PR
+		comp, _, err := gh.Repositories.CompareCommits(
+			context.Background(),
+			*ev.Repo.Owner.Login, *ev.Repo.Name,
+			ev.PullRequest.Base.GetLabel(),
+			ev.PullRequest.Head.GetLabel(),
+		)
+		if err != nil {
+			return "Could not contact GitHub", false
+		}
+
+		for _, commit := range comp.Commits {
+			success := false
+			for _, re := range config.Commit.SubjectMustMatchRegex {
+				if commitMessageMatchesRegex(commit.Commit.GetMessage(), re) {
+					success = true
+				}
+			}
+
+			if !success {
+				return fmt.Sprintf("Commit %s message does not match any valid format", commit.GetSHA()[0:6]), false
+			}
+		}
+	}
+
+	return "", true
 }
 
 func webhookSetStatus(gh *github.Client, ev *github.PullRequestEvent, state string, description string, statusContext string) {
